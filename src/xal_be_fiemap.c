@@ -266,7 +266,7 @@ xal_be_fiemap_process_inode_dir(struct xal *xal, char *path, struct xal_inode *i
 	struct dirent *entry;
 	struct xal_dentry *de;
 	DIR *d;
-	size_t n_entries = 0, capacity = 0;
+	uint32_t n_entries = 0, capacity = 0;
 	int err;
 
 	if (!xal_inode_is_dir(inode)) {
@@ -307,10 +307,14 @@ xal_be_fiemap_process_inode_dir(struct xal *xal, char *path, struct xal_inode *i
 
 	qsort(entries, n_entries, sizeof(*entries), compare_dirent);
 
-	err = xal_pool_claim_dentries(&xal->dentries, n_entries, &inode->content.dentries.dentry_idx);
-	if (err) {
-		XAL_DEBUG("FAILED: xal_pool_claim_dentries(); err(%d)", err);
-		goto failed;
+	if (n_entries > inode->alloc_count) {
+		err = xal_pool_claim_dentries(&xal->dentries, n_entries, &inode->content.dentries.dentry_idx);
+		if (err) {
+			XAL_DEBUG("FAILED: xal_pool_claim_dentries(); err(%d)", err);
+			goto failed;
+		}
+		inode->alloc_count = n_entries;
+		XAL_DEBUG("INFO: allocated dentry slots(%d) for file(%s)", n_entries, inode->name);
 	}
 
 	de = xal_dentry_at(xal, inode->content.dentries.dentry_idx);
@@ -322,7 +326,7 @@ xal_be_fiemap_process_inode_dir(struct xal *xal, char *path, struct xal_inode *i
 	inode->content.dentries.count = 0;
 
 	/* Actually process directory entries */
-	for (size_t i = 0; i < n_entries; i++) {
+	for (uint32_t i = 0; i < n_entries; i++) {
 		entry = entries[i];
 
 		de = xal_dentry_at(xal, inode->content.dentries.dentry_idx + inode->content.dentries.count);
@@ -454,10 +458,14 @@ xal_be_fiemap_process_inode_file(struct xal *xal, char *path, struct xal_inode *
 	if (fiemap->fm_mapped_extents > 0) {
 		struct xal_extents *extents;
 
-		err = xal_pool_claim_extents(&xal->extents, fiemap->fm_mapped_extents, &inode->content.extents.extent_idx);
-		if (err) {
-			XAL_DEBUG("FAILED: xal_pool_claim_extents(); err(%d)", err);
-			goto failed;
+		if (fiemap->fm_mapped_extents > inode->alloc_count) {
+			err = xal_pool_claim_extents(&xal->extents, fiemap->fm_mapped_extents, &inode->content.extents.extent_idx);
+			if (err) {
+				XAL_DEBUG("FAILED: xal_pool_claim_extents(); err(%d)", err);
+				goto failed;
+			}
+			inode->alloc_count = fiemap->fm_mapped_extents;
+			XAL_DEBUG("INFO: allocated extent slots(%d) for file(%s)", fiemap->fm_mapped_extents, inode->name);
 		}
 
 		extents = &inode->content.extents;

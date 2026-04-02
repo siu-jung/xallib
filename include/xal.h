@@ -27,6 +27,7 @@ struct xal_backend_base {
 struct xal {
 	struct xnvme_dev *dev;
 	struct xal_pool inodes;  ///< Pool of inodes in host-native format
+	struct xal_pool dentries;///< Pool of dentries in host-native format. Only used with XAL_BACKEND_FIEMAP.
 	struct xal_pool extents; ///< Pool of extents in host-native format
 	uint32_t root_idx;       ///< Index of the root inode in the inodes pool
 	struct xal_sb sb;

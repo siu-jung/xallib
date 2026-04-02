@@ -241,7 +241,7 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 				atomic_fetch_add(&xal->seq_lock, 1);
 
 				for (uint32_t j = 0; j < dir_inode->content.dentries.count; ++j) {
-					struct xal_inode *child = xal_inode_at(xal, dir_inode->content.dentries.inodes_idx + j);
+					struct xal_inode *child = xal_inode_from_dentry(xal, dir_inode->content.dentries.dentry_idx + j);
 
 					if (strcmp(child->name, path) == 0) {
 						inode = child;

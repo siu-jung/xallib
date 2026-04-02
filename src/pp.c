@@ -164,6 +164,7 @@ xal_odf_dinode_format_str(int val)
 int
 xal_inode_pp(struct xal *xal, struct xal_inode *inode)
 {
+	struct xal_backend_base *be;
 	int wrtn = 0;
 
 	if (!inode) {
@@ -178,14 +179,22 @@ xal_inode_pp(struct xal *xal, struct xal_inode *inode)
 	wrtn += printf("  name: '%.256s'\n", inode->name);
 	wrtn += printf("  ftype: %" PRIu8 "\n", inode->ftype);
 
+	be = (struct xal_backend_base *)&xal->be;
+
 	switch (inode->ftype) {
 	case XAL_ODF_DIR3_FT_DIR:
-		struct xal_inode *children = xal_inode_at(xal, inode->content.dentries.inodes_idx);
-
 		wrtn += printf("  dentries.count: %u\n", inode->content.dentries.count);
 
-		for (uint8_t i = 0; i < inode->content.dentries.count; ++i) {
-			xal_inode_pp(xal, &children[i]);
+		if (be->type == XAL_BACKEND_XFS) {
+			struct xal_inode *child_inode = xal_inode_at(xal, inode->content.dentries.dentry_idx);
+			for (uint8_t i = 0; i < inode->content.dentries.count; ++i) {
+				xal_inode_pp(xal, &child_inode[i]);
+			}
+		} else {
+			struct xal_dentry *child_dentry = xal_dentry_at(xal, inode->content.dentries.dentry_idx);
+			for (uint8_t i = 0; i < inode->content.dentries.count; ++i) {
+				xal_inode_pp(xal, xal_inode_at(xal, child_dentry[i].inode_idx));
+			}
 		}
 
 		break;

@@ -46,6 +46,9 @@ int
 xal_pool_claim_extents(struct xal_pool *pool, size_t count, uint32_t *idx);
 
 int
+xal_pool_claim_dentries(struct xal_pool *pool, size_t count, uint32_t *idx);
+
+int
 xal_pool_claim_inodes(struct xal_pool *pool, size_t count, uint32_t *idx);
 
 int

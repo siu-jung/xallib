@@ -61,6 +61,10 @@ struct xal_opts {
 	const char *shm_name; ///< If set, pool memory is backed by POSIX shared memory with this base name, see @xal_from_pools() for sharing the pools across processes
 };
 
+struct xal_dentry {
+	uint32_t inode_idx;
+};
+
 struct xal_extent {
 	uint64_t start_offset;
 	uint64_t start_block;
@@ -89,7 +93,7 @@ xal_extent_converted_pp(struct xal_extent_converted *extent);
 struct xal_inode;
 
 struct xal_dentries {
-	uint32_t inodes_idx; ///< Index of first child in xal->inodes pool
+	uint32_t dentry_idx; ///< Index of first child in xal->inodes(XFS mode) or xal->dentries(FIEMAP mode) pool
 	uint32_t count;      ///< Number of children; for directories
 };
 
@@ -143,6 +147,12 @@ struct xal_sb {
 
 struct xal_inode *
 xal_inode_at(struct xal *xal, uint32_t idx);
+
+struct xal_dentry *
+xal_dentry_at(struct xal *xal, uint32_t idx);
+
+struct xal_inode *
+xal_inode_from_dentry(struct xal *xal, uint32_t idx);
 
 struct xal_extent *
 xal_extent_at(struct xal *xal, uint32_t idx);
@@ -257,6 +267,7 @@ xal_close(struct xal *xal);
  * @param sb           Superblock metadata
  * @param mountpoint   Mountpoint of the file system
  * @param inodes_mem   Pointer to the mapped inode pool memory; the root inode must be at index 0
+ * @param dentries_mem Pointer to the mapped dentry pool memory; only used with FIEMAP mode; give NULL for XFS mode.
  * @param extents_mem  Pointer to the mapped extent pool memory
  * @param out          Output pointer for the constructed xal
  *
@@ -264,7 +275,7 @@ xal_close(struct xal *xal);
  */
 int
 xal_from_pools(const struct xal_sb *sb, const char *mountpoint, void *inodes_mem,
-	void *extents_mem, struct xal **out);
+	void *dentries_mem, void *extents_mem, struct xal **out);
 
 /**
  * Retrieve inodes from disk and decode the on-disk-format of the retrieved data

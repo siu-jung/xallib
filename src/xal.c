@@ -56,6 +56,20 @@ xal_inode_at(struct xal *xal, uint32_t idx)
 	return (struct xal_inode *)xal->inodes.memory + idx;
 }
 
+struct xal_dentry *
+xal_dentry_at(struct xal *xal, uint32_t idx)
+{
+	return (struct xal_dentry *)xal->dentries.memory + idx;
+}
+
+struct xal_inode *
+xal_inode_from_dentry(struct xal *xal, uint32_t idx)
+{
+	struct xal_dentry *dentry = xal_dentry_at(xal, idx);
+
+	return xal_inode_at(xal, dentry->inode_idx);
+}
+
 struct xal_extent *
 xal_extent_at(struct xal *xal, uint32_t idx)
 {
@@ -70,7 +84,7 @@ xal_inode_idx(struct xal *xal, struct xal_inode *inode)
 
 int
 xal_from_pools(const struct xal_sb *sb, const char *mountpoint, void *inodes_mem,
-	void *extents_mem, struct xal **out)
+	void *dentries_mem, void *extents_mem, struct xal **out)
 {
 	struct xal *xal;
 
@@ -92,6 +106,9 @@ xal_from_pools(const struct xal_sb *sb, const char *mountpoint, void *inodes_mem
 			free(xal);
 			return -ENOMEM;
 		}
+
+		xal->dentries.memory = dentries_mem;
+		xal->dentries.element_size = sizeof(struct xal_dentry);
 	}
 
 	xal->inodes.memory = inodes_mem;
@@ -124,6 +141,7 @@ xal_close(struct xal *xal)
 	}
 
 	xal_pool_unmap(&xal->inodes);
+	xal_pool_unmap(&xal->dentries);
 	xal_pool_unmap(&xal->extents);
 
 	be = (struct xal_backend_base *)&xal->be;
@@ -267,6 +285,7 @@ xal_index(struct xal *xal)
 static int
 _walk(struct xal *xal, struct xal_inode *inode, xal_walk_cb cb_func, void *cb_data, int depth)
 {
+	struct xal_backend_base *be;
 	int err;
 
 	if (atomic_load(&xal->dirty)) {
@@ -281,12 +300,20 @@ _walk(struct xal *xal, struct xal_inode *inode, xal_walk_cb cb_func, void *cb_da
 		}
 	}
 
+	be = (struct xal_backend_base *)&xal->be;
+
 	switch (inode->ftype) {
 	case XAL_ODF_DIR3_FT_DIR: {
-		struct xal_inode *inodes = xal_inode_at(xal, inode->content.dentries.inodes_idx);
-
 		for (uint32_t i = 0; i < inode->content.dentries.count; ++i) {
-			err = _walk(xal, &inodes[i], cb_func, cb_data, depth + 1);
+			struct xal_inode *child;
+
+			if (be->type == XAL_BACKEND_XFS) {
+				child = xal_inode_at(xal, inode->content.dentries.dentry_idx + i);
+			} else {
+				child = xal_inode_from_dentry(xal, inode->content.dentries.dentry_idx + i);
+			}
+
+			err = _walk(xal, child, cb_func, cb_data, depth + 1);
 			if (err) {
 				return err;
 			}

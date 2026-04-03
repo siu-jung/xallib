@@ -99,7 +99,8 @@ int
 xal_be_fiemap_inotify_add_watcher(struct xal_inotify *inotify, char *path, struct xal_inode *inode)
 {
 	khash_t(wd_to_inode) *inode_map;
-	uint32_t mask = IN_CREATE | IN_DELETE | IN_MOVE | IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_UNMOUNT;
+	uint32_t mask = IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MODIFY |
+		IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO | IN_Q_OVERFLOW | IN_UNMOUNT;
 	khiter_t iter;
 	int wd, err;
 
@@ -212,32 +213,41 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 				return -EINVAL;
 			}
 
+			// events that change the filesystem, TODO: implement for each, or rescan
+			if (event->mask & (IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM |
+						IN_MOVED_TO | IN_Q_OVERFLOW)) {
+				XAL_DEBUG("INFO: event mask:%s, filesystem has changed", mask_pp);
+				return 1;
+			}
+
+			// get wd's inode & event's path. event can be dir itself or its child
+			iter = kh_get(wd_to_inode, inode_map, wd);
+			if (iter == kh_end(inode_map)) {
+				XAL_DEBUG("FAILED: kh_get(%d) for event with name(%s)", wd, event->name);
+				return -EINVAL;
+			}
+			XAL_DEBUG("INFO: found watch descriptor(%d) for event with name(%s)", wd, event->name);
+
+			dir_inode = kh_val(inode_map, iter);
+			if (!xal_inode_is_dir(dir_inode)) {
+				XAL_DEBUG("FAILED: found inode(%s) is not a directory", dir_inode->name);
+				return -EINVAL;
+			}
+
+			if (dir_inode->namelen + 1 + strlen(event->name) + 1 > sizeof(path)) {
+				XAL_DEBUG("FAILED: event(%s) full path too long(%zu)",
+						event->name, dir_inode->namelen + 1 + strlen(event->name) + 1);
+				return -EINVAL;
+			}
+			memcpy(path, dir_inode->name, dir_inode->namelen);
+			path[dir_inode->namelen] = '/';
+			memcpy(path + dir_inode->namelen + 1, event->name, strlen(event->name));
+			path[dir_inode->namelen + 1 + strlen(event->name)] = '\0';
+
+			XAL_DEBUG("INFO: got full path of event: %s", path);
+
+			// noticed a write to child file
 			if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE)) {
-				iter = kh_get(wd_to_inode, inode_map, wd);
-				if (iter == kh_end(inode_map)) {
-					XAL_DEBUG("FAILED: kh_get(%d) for event with name(%s)", wd, event->name);
-					return -EINVAL;
-				}
-
-				XAL_DEBUG("INFO: found watch descriptor(%d) for event with name(%s)", wd, event->name);
-
-				dir_inode = kh_val(inode_map, iter);
-				if (!xal_inode_is_dir(dir_inode)) {
-					XAL_DEBUG("FAILED: found inode(%s) is not a directory", dir_inode->name);
-					return -EINVAL;
-				}
-
-				if (dir_inode->namelen + 1 + strlen(event->name) + 1 > sizeof(path)) {
-					XAL_DEBUG("FAILED: event(%s) full path too long(%zu)",
-							event->name, dir_inode->namelen + 1 + strlen(event->name) + 1);
-					return -EINVAL;
-				}
-				memcpy(path, dir_inode->name, dir_inode->namelen);
-				path[dir_inode->namelen] = '/';
-				memcpy(path + dir_inode->namelen + 1, event->name, strlen(event->name));
-				path[dir_inode->namelen + 1 + strlen(event->name)] = '\0';
-
-				XAL_DEBUG("INFO: got full path of event: %s", path);
 				atomic_fetch_add(&xal->seq_lock, 1);
 
 				for (uint32_t j = 0; j < dir_inode->content.dentries.count; ++j) {
@@ -277,10 +287,6 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 				XAL_DEBUG_FCALL(xal_inode_pp, xal, inode);
 
 				atomic_fetch_add(&xal->seq_lock, 1);
-
-			} else if (event->mask & (IN_CREATE | IN_DELETE | IN_MOVE)) {
-				XAL_DEBUG("INFO: File system has changed, event mask:%s", mask_pp);
-				return 1;
 			}
 
 			i += sizeof(struct inotify_event) + event->len;

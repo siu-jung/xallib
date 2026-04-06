@@ -17,6 +17,7 @@
 #include <xal.h>
 #include <xal_be_fiemap.h>
 #include <xal_be_fiemap_inotify.h>
+#include <xal_odf.h>
 
 KHASH_MAP_INIT_INT64(wd_to_inode, struct xal_inode *);
 
@@ -178,12 +179,13 @@ static int
 check_events(struct xal *xal, struct xal_inotify *inotify)
 {
 	struct xal_inode *dir_inode, *inode;
+	struct xal_dentry *de;
 	kh_wd_to_inode_t *inode_map;
 	char buf[4096] __attribute__ ((aligned(__alignof__(struct inotify_event))));
 	char path[XAL_PATH_MAXLEN];
 	khiter_t iter;
 	ssize_t len, i;
-	struct stat st;
+	struct stat sb;
 	int err;
 
 	inode_map = inotify->inode_map;
@@ -197,7 +199,9 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 			struct inotify_event *event = (struct inotify_event *)&buf[i];
 			__attribute__((unused)) char mask_pp[128];
 
+			memset(path, 0, sizeof(path));
 			inode = NULL;  // reset the pointer to the inode
+			de = NULL;
 			wd = event->wd;
 
 			XAL_DEBUG_FCALL(inotify_event_mask_pp, event->mask, mask_pp, 128);
@@ -214,7 +218,7 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 			}
 
 			// events that change the filesystem, TODO: implement for each, or rescan
-			if (event->mask & (IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM |
+			if (event->mask & (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM |
 						IN_MOVED_TO | IN_Q_OVERFLOW)) {
 				XAL_DEBUG("INFO: event mask:%s, filesystem has changed", mask_pp);
 				return 1;
@@ -246,8 +250,62 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 
 			XAL_DEBUG("INFO: got full path of event: %s", path);
 
+			if (event->mask & IN_CREATE) {
+				atomic_fetch_add(&xal->seq_lock, 1);
+
+				if (dir_inode->content.dentries.count == dir_inode->alloc_count) {
+					// need realloc from dentry pool
+					struct xal_dentry *old_de = xal_dentry_at(xal, dir_inode->content.dentries.dentry_idx);
+					err = xal_pool_claim_dentries(&xal->dentries, dir_inode->alloc_count + 1,
+							&dir_inode->content.dentries.dentry_idx);
+					if (err) {
+						XAL_DEBUG("FAILED: xal_pool_claim_dentries(); err(%d)", err);
+						goto failed_with_lock;
+					}
+					de = xal_dentry_at(xal, dir_inode->content.dentries.dentry_idx);
+					memcpy(de, old_de, dir_inode->alloc_count * sizeof(struct xal_dentry));
+					dir_inode->alloc_count += 1;
+				}
+
+				de = xal_dentry_at(xal, dir_inode->content.dentries.dentry_idx + dir_inode->content.dentries.count);
+
+				err = xal_pool_claim_inodes(&xal->inodes, 1, &de->inode_idx);
+				if (err) {
+					XAL_DEBUG("FAILED: xal_pool_claim_inodes(); err(%d)", err);
+					goto failed_with_lock;
+				}
+
+				inode = xal_inode_at(xal, de->inode_idx);
+				err = stat(path, &sb);
+				if (err) {
+					XAL_DEBUG("FAILED: stat(%s) errno(%d) while getting new file size", path, errno);
+					err = -errno;
+					goto failed_with_lock;
+				}
+				inode->ino = sb.st_ino;
+				inode->size = sb.st_size;
+				if (!inode->ftype) {
+					if (S_ISDIR(sb.st_mode)) {
+						inode->ftype = XAL_ODF_DIR3_FT_DIR;
+					} else if (S_ISREG(sb.st_mode)) {
+						inode->ftype = XAL_ODF_DIR3_FT_REG_FILE;
+					} else {
+						XAL_DEBUG("FAILED: mask(%s) unsupported ftype", mask_pp);
+						goto failed_with_lock;
+					}
+				}
+				inode->namelen = strlen(path);
+				memcpy(inode->name, path, strlen(path));
+				inode->alloc_count = 0;
+				inode->parent_idx = xal_inode_idx(xal, dir_inode);
+
+				dir_inode->content.dentries.count += 1;
+				XAL_DEBUG("INFO: finished creating inode:");
+				XAL_DEBUG_FCALL(xal_inode_pp, xal, dir_inode);
+				atomic_fetch_add(&xal->seq_lock, 1);
+			}
 			// noticed a write to child file
-			if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE)) {
+			else if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE)) {
 				atomic_fetch_add(&xal->seq_lock, 1);
 
 				for (uint32_t j = 0; j < dir_inode->content.dentries.count; ++j) {
@@ -275,13 +333,13 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 				}
 
 				// Update to new file size
-				err = stat(path, &st);
+				err = stat(path, &sb);
 				if (err) {
 					XAL_DEBUG("FAILED: stat(%s) errno(%d) while getting new file size", path, errno);
 					err = -errno;
 					goto failed_with_lock;
 				}
-				inode->size = st.st_size;
+				inode->size = sb.st_size;
 
 				XAL_DEBUG("INFO: finished reprocessing inode:");
 				XAL_DEBUG_FCALL(xal_inode_pp, xal, inode);

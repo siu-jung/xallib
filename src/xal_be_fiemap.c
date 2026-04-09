@@ -16,11 +16,14 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 #include <xal.h>
 #include <xal_be_fiemap.h>
 #include <xal_be_fiemap_inotify.h>
 #include <xal_odf.h>
+#include <xal_bpf_events.h>
+#include <xal_bpf.h>
 
 KHASH_MAP_INIT_STR(path_to_inode, struct xal_inode *)
 
@@ -46,6 +49,10 @@ xal_be_fiemap_close(struct xal *xal)
 
 	if (be->inotify) {
 		xal_be_fiemap_inotify_close(be->inotify);
+	}
+
+	if (be->bpf) {
+		xal_be_fiemap_bpf_close(be->bpf);
 	}
 
 	inode_map = be->path_inode_map;
@@ -162,17 +169,19 @@ xal_be_fiemap_open(struct xal **xal, char *mountpoint, struct xal_opts *opts)
 	strcpy(be->mountpoint, mountpoint);
 
 	if (opts->watch_mode) {
-		be->inotify = calloc(1, sizeof(struct xal_inotify));
-		if (!be->inotify) {
-			XAL_DEBUG("FAILED: calloc(); errno(%d)", errno);
-			err = -errno;
-			goto failed;
-		}
+		if (opts->watch_mode != XAL_WATCHMODE_BPF) {
+			be->inotify = calloc(1, sizeof(struct xal_inotify));
+			if (!be->inotify) {
+				XAL_DEBUG("FAILED: calloc(); errno(%d)", errno);
+				err = -errno;
+				goto failed;
+			}
 
-		err = xal_be_fiemap_inotify_init(be->inotify, opts->watch_mode);
-		if (err) {
-			XAL_DEBUG("FAILED: xal_be_fiemap_inotify_init()");
-			goto failed;
+			err = xal_be_fiemap_inotify_init(be->inotify, opts->watch_mode);
+			if (err) {
+				XAL_DEBUG("FAILED: xal_be_fiemap_inotify_init()");
+				goto failed;
+			}
 		}
 	}
 
@@ -193,6 +202,27 @@ xal_be_fiemap_open(struct xal **xal, char *mountpoint, struct xal_opts *opts)
 	cand->sb.blocksize = sb.st_blksize;
 	cand->sb.rootino = sb.st_ino;
 
+	if (opts->watch_mode == XAL_WATCHMODE_BPF) {
+		struct xal_bpf *bpf = calloc(1, sizeof(struct xal_bpf));
+		if (!bpf) {
+			XAL_DEBUG("FAILED: calloc(); errno(%d)", errno);
+			err = -errno;
+			goto failed;
+		}
+
+		bpf->ctx.dev_major = major(sb.st_dev);
+		bpf->ctx.dev_minor = minor(sb.st_dev);
+		bpf->ctx.fs_block_size = sb.st_blksize;
+
+		err = xal_be_fiemap_bpf_init(bpf);
+		if (err) {
+			XAL_DEBUG("FAILED: xal_be_fiemap_bpf_init()");
+			goto failed;
+		}
+
+		be->bpf = bpf;
+	}
+
 	if (opts->shm_name && strlen(opts->shm_name) > XAL_PATH_MAXLEN) {
 		XAL_DEBUG("FAILED: shm_name too long");
 		err = -EINVAL;
@@ -200,6 +230,7 @@ xal_be_fiemap_open(struct xal **xal, char *mountpoint, struct xal_opts *opts)
 	}
 
 	shm = NULL;
+
 	if (opts->shm_name) {
 		snprintf(shm_name, sizeof(shm_name), "%s_inodes", opts->shm_name);
 		shm = shm_name;
@@ -587,6 +618,14 @@ xal_be_fiemap_index(struct xal *xal)
 		err = xal_be_fiemap_inotify_clear_inode_map(be->inotify);
 		if (err) {
 			XAL_DEBUG("FAILED: xal_be_fiemap_inotify_clear_inode_map(); err(%d)", err);
+			goto exit;
+		}
+	}
+
+	if (be->bpf) {
+		err = xal_be_fiemap_bpf_rb_init(be->bpf);
+		if (err) {
+			XAL_DEBUG("FAILED: xal_be_fiemap_bpf_rb_init(); err(%d)", err);
 			goto exit;
 		}
 	}

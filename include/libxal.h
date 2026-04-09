@@ -47,6 +47,7 @@ enum xal_watchmode {
 	XAL_WATCHMODE_NONE             = 0,  ///< There will be no notifications of changes to the filesystem.
 	XAL_WATCHMODE_DIRTY_DETECTION  = 1,  ///< When changes to the file system occurs, the xal struct will become "dirty" indicating that the representation of the file system is stale.
 	XAL_WATCHMODE_EXTENT_UPDATE    = 2,  ///< When other changes to the file system occurs, the xal struct will be automatically updated if the extent information is the only subject to change, otherwise the xal struct will become "dirty" indicating that the representation of the file system is stale.
+	XAL_WATCHMODE_BPF,
 };
 
 enum xal_file_lookupmode {
@@ -422,4 +423,9 @@ xal_get_extents(struct xal *xal, char *path, struct xal_extents **extents);
 int
 xal_get_dentries(struct xal *xal, char *path, struct xal_dentries **dentries);
 
+int
+xal_bpf_start_poll_thread(struct xal *xal);
+
+int
+xal_bpf_stop_poll_thread(struct xal *xal);
 #endif /* LIBXAL_H */

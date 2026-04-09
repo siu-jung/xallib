@@ -267,6 +267,15 @@ check_events(struct xal *xal, struct xal_inotify *inotify)
 					dir_inode->alloc_count += 1;
 				}
 
+				// get parent directory size
+				err = stat(dir_inode->name, &sb);
+				if (err) {
+					XAL_DEBUG("FAILED: stat(%s) errno(%d) while getting parent dir size", dir_inode->name, errno);
+					err = -errno;
+					goto failed_with_lock;
+				}
+				dir_inode->size = sb.st_size;
+
 				de = xal_dentry_at(xal, dir_inode->content.dentries.dentry_idx + dir_inode->content.dentries.count);
 
 				err = xal_pool_claim_inodes(&xal->inodes, 1, &de->inode_idx);

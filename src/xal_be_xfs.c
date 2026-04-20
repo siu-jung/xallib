@@ -733,7 +733,7 @@ xal_be_xfs_open(struct xnvme_dev *dev, struct xal **xal, struct xal_opts *opts)
 		snprintf(shm_name, sizeof(shm_name), "%s_inodes", opts->shm_name);
 		shm = shm_name;
 	}
-	err = xal_pool_map(&cand->inodes, 40000000UL, cand->sb.nallocated, sizeof(struct xal_inode),
+	err = xal_pool_map(&cand->inodes, XAL_POOL_TOTAL_ENTRIES, cand->sb.nallocated, sizeof(struct xal_inode),
 	                   shm);
 	if (err) {
 		XAL_DEBUG("FAILED: xal_pool_map(inodes); err(%d)", err);
@@ -745,7 +745,7 @@ xal_be_xfs_open(struct xnvme_dev *dev, struct xal **xal, struct xal_opts *opts)
 		snprintf(shm_name, sizeof(shm_name), "%s_extents", opts->shm_name);
 		shm = shm_name;
 	}
-	err = xal_pool_map(&cand->extents, 40000000UL, cand->sb.nallocated, sizeof(struct xal_extent),
+	err = xal_pool_map(&cand->extents, XAL_POOL_TOTAL_ENTRIES, cand->sb.nallocated, sizeof(struct xal_extent),
 	                   shm);
 	if (err) {
 		XAL_DEBUG("FAILED: xal_pool_map(extents); err(%d)", err);

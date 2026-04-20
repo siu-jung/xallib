@@ -204,7 +204,7 @@ xal_be_fiemap_open(struct xal **xal, char *mountpoint, struct xal_opts *opts)
 		snprintf(shm_name, sizeof(shm_name), "%s_inodes", opts->shm_name);
 		shm = shm_name;
 	}
-	err = xal_pool_map(&cand->inodes, 40000000UL, nallocated, sizeof(struct xal_inode), shm);
+	err = xal_pool_map(&cand->inodes, XAL_POOL_TOTAL_ENTRIES, nallocated, sizeof(struct xal_inode), shm);
 	if (err) {
 		XAL_DEBUG("FAILED: xal_pool_map(inodes); err(%d)", err);
 		goto failed;
@@ -214,7 +214,7 @@ xal_be_fiemap_open(struct xal **xal, char *mountpoint, struct xal_opts *opts)
 	if (opts->shm_name) {
 		snprintf(shm_name, sizeof(shm_name), "%s_dentries", opts->shm_name);
 	}
-	err = xal_pool_map(&cand->dentries, 40000000UL, nallocated, sizeof(struct xal_dentry),
+	err = xal_pool_map(&cand->dentries, XAL_POOL_TOTAL_ENTRIES, nallocated, sizeof(struct xal_dentry),
 						opts->shm_name ? shm_name : NULL);
 	if (err) {
 		XAL_DEBUG("FAILED: xal_pool_map(dentries); err(%d)", err);
@@ -225,7 +225,7 @@ xal_be_fiemap_open(struct xal **xal, char *mountpoint, struct xal_opts *opts)
 		snprintf(shm_name, sizeof(shm_name), "%s_extents", opts->shm_name);
 		shm = shm_name;
 	}
-	err = xal_pool_map(&cand->extents, 40000000UL, nallocated, sizeof(struct xal_extent), shm);
+	err = xal_pool_map(&cand->extents, XAL_POOL_TOTAL_ENTRIES, nallocated, sizeof(struct xal_extent), shm);
 	if (err) {
 		XAL_DEBUG("FAILED: xal_pool_map(extents); err(%d)", err);
 		goto failed;

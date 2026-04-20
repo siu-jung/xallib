@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#define XAL_POOL_TOTAL_ENTRIES	40000000UL
 /**
  * A pool of mmap backed memory for fixed-size elements.
  *
